@@ -5,7 +5,8 @@ set -euo pipefail
 PROXY_HOST="127.0.0.1"
 PROXY_PORT=8000
 OPENCLAW_PORT=18789
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 获取脚本所在目录的绝对路径（支持从任意位置调用）
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_DIR="$PROJECT_DIR/.pids"
 LOG_DIR="$PROJECT_DIR/.logs"
 

@@ -73,8 +73,8 @@ python3 main.py
             "name": "GLM-5.1 (via TraeCLI)",
             "api": "openai-responses",
             "reasoning": true,
-            "contextWindow": 32768,
-            "maxTokens": 8192
+            "contextWindow": 131072,
+            "maxTokens": 16384
           }
         ]
       }
