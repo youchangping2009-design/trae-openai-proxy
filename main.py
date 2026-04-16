@@ -33,67 +33,48 @@ class ChatCompletionRequest(BaseModel):
 
 # ─── 调用TraeCLI ────────────────────────────────────────
 async def call_traecli(prompt: str) -> str:
-    """异步调用TraeCLI，避免阻塞事件循环"""
-    if not isinstance(prompt, str):
-        prompt = str(prompt)
-
+    """异步调用TraeCLI，失败时抛出异常"""
     def _run():
-        try:
-            result = subprocess.run(
-                [TRAECLI_PATH, prompt, "--print"],
-                capture_output=True,
-                text=True,
-                timeout=TRAECLI_TIMEOUT
-            )
-            if result.returncode != 0:
-                logger.warning("TraeCLI stderr: %s", result.stderr[:200])
-                return result.stderr.strip() or "TraeCLI返回错误"
-            return result.stdout.strip()
-        except subprocess.TimeoutExpired:
-            return "请求超时，请稍后再试"
-        except FileNotFoundError:
-            return f"找不到TraeCLI（路径：{TRAECLI_PATH}），请确认已安装"
-        except Exception as e:
-            return f"调用TraeCLI出错: {e}"
+        result = subprocess.run(
+            [TRAECLI_PATH, prompt, "--print"],
+            capture_output=True,
+            text=True,
+            timeout=TRAECLI_TIMEOUT,
+            check=True  # 非零退出码会抛出 CalledProcessError
+        )
+        return result.stdout.strip()
 
-    return await asyncio.to_thread(_run)
+    try:
+        return await asyncio.to_thread(_run)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="TraeCLI 请求超时")
+    except subprocess.CalledProcessError as e:
+        logger.error("TraeCLI 错误: %s", e.stderr[:200])
+        raise HTTPException(status_code=500, detail=f"TraeCLI 执行失败: {e.stderr[:100]}")
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail=f"找不到 TraeCLI (路径: {TRAECLI_PATH})")
 
 # ─── 从OpenClaw请求中提取用户问题 ────────────────────────
 def extract_user_question(request_body: dict) -> str:
-    """从OpenAI Responses API格式的请求中提取用户实际问题"""
-    prompt = ""
+    """从OpenAI Responses API格式的请求中提取用户问题
 
-    if "input" in request_body and isinstance(request_body["input"], list):
-        for msg in reversed(request_body["input"]):
-            if not isinstance(msg, dict):
-                continue
-            # {"type": "input_text", "text": "问题"}
-            if msg.get("type") == "input_text" and "text" in msg:
-                prompt = msg["text"]
-                break
-            # {"role": "user", "content": [{"type": "input_text", "text": "问题"}]}
-            if msg.get("role") == "user" and "content" in msg:
+    假设格式: {"input": [{"role": "user", "content": [{"type": "input_text", "text": "..."}]}]}
+    """
+    try:
+        input_list = request_body["input"]
+        # 从后往前找最后一条用户消息
+        for msg in reversed(input_list):
+            if msg.get("role") == "user":
                 content = msg["content"]
+                if isinstance(content, str):
+                    return content.strip()
                 if isinstance(content, list):
-                    for item in reversed(content):
-                        if isinstance(item, dict) and item.get("type") == "input_text" and "text" in item:
-                            prompt = item["text"]
-                            break
-                elif isinstance(content, str):
-                    prompt = content
-                break
-
-    # 去除OpenClaw注入的Sender元数据，只保留用户实际输入
-    if "Sender (untrusted metadata):" in prompt:
-        # 元数据格式: Sender ...\n```json\n{...}\n```\n\n[时间戳] 实际问题
-        lines = prompt.split("\n")
-        for line in reversed(lines):
-            line = line.strip()
-            if line and not line.startswith("Sender") and not line.startswith("```") and not line.startswith("{") and not line.startswith("}"):
-                prompt = line
-                break
-
-    return prompt.strip() or "Hello"
+                    for item in content:
+                        if item.get("type") == "input_text":
+                            return item["text"].strip()
+        raise ValueError("未找到用户消息")
+    except (KeyError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"无效的请求格式: {e}")
 
 # ─── SSE流式响应生成器 ──────────────────────────────────
 def generate_sse_stream(response_content: str, model: str):
@@ -136,21 +117,19 @@ def generate_sse_stream(response_content: str, model: str):
     # 7. 输出项完成
     yield sse("response.output_item.done", {"type": "response.output_item.done", "output_index": 0, "item": {"type": "message", "id": msg_id, "role": "assistant", "content": [{"type": "output_text", "text": response_content}], "status": "completed"}})
 
-    # 8. 响应完成
-    out_tokens = max(len(response_content.split()), 1)
+    # 8. 响应完成（不返回 usage，因为无法准确计算）
     yield sse("response.completed", {
         "type": "response.completed",
         "response": {
             "id": resp_id, "object": "response", "created_at": created_at,
             "status": "completed", "model": model,
             "output": [{"type": "message", "id": msg_id, "role": "assistant", "content": [{"type": "output_text", "text": response_content}], "status": "completed"}],
-            "usage": {"input_tokens": 10, "output_tokens": out_tokens, "total_tokens": 10 + out_tokens}
+            "usage": None
         }
     })
 
 # ─── 非流式响应构建 ─────────────────────────────────────
 def build_responses_api_response(response_content: str, model: str) -> dict:
-    out_tokens = max(len(response_content.split()), 1)
     return {
         "id": "resp_" + uuid.uuid4().hex[:24],
         "object": "response",
@@ -164,7 +143,7 @@ def build_responses_api_response(response_content: str, model: str) -> dict:
             "content": [{"type": "output_text", "text": response_content}],
             "status": "completed"
         }],
-        "usage": {"input_tokens": 10, "output_tokens": out_tokens, "total_tokens": 10 + out_tokens}
+        "usage": None  # TraeCLI 不提供 token 统计
     }
 
 # ─── API端点 ────────────────────────────────────────────
@@ -178,6 +157,9 @@ async def chat_completions(request: ChatCompletionRequest):
             user_question = msg.content
             break
 
+    if not user_question:
+        raise HTTPException(status_code=400, detail="未找到用户消息")
+
     response_content = await call_traecli(user_question)
     return {
         "id": "chatcmpl-" + uuid.uuid4().hex[:12],
@@ -185,7 +167,7 @@ async def chat_completions(request: ChatCompletionRequest):
         "created": int(time.time()),
         "model": request.model,
         "choices": [{"index": 0, "message": {"role": "assistant", "content": response_content}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        "usage": None  # TraeCLI 不提供 token 统计
     }
 
 @app.post("/v1/responses")

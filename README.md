@@ -204,6 +204,9 @@ model:
 ```
 trae-openai-proxy/
 ├── main.py           # 代理服务主程序
+├── test_main.py      # 单元测试
+├── start.sh          # 启动脚本
+├── stop.sh           # 停止脚本
 └── requirements.txt  # Python 依赖
 ```
 
@@ -212,6 +215,22 @@ trae-openai-proxy/
 - **fastapi** — Web 框架
 - **uvicorn** — ASGI 服务器
 - **pydantic** — 请求模型校验
+- **pytest** — 测试框架
+- **httpx** — HTTP 客户端（测试用）
+
+## 测试
+
+```bash
+pytest test_main.py -v
+```
+
+## 设计原则
+
+本项目遵循 Karpathy 的编码原则：
+- **简单优先**：最小化代码，不做过度抽象
+- **明确失败**：错误抛异常而非返回错误字符串
+- **不伪造数据**：无法准确计算的 token 数返回 `null`
+- **假设明确**：期望固定的输入格式，格式错误直接报 400
 
 ## License
 
