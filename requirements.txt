@@ -1,5 +1,3 @@
 fastapi
 uvicorn
 pydantic
-pytest
-httpx  # TestClient 需要

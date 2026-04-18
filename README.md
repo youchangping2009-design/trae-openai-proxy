@@ -28,30 +28,35 @@ traecli "你好" --print
 
 ## 快速开始
 
-### 方式一：使用启动脚本（推荐）
+### 使用启动脚本（推荐）
 
 ```bash
-cd ~/trae-openai-proxy
-./start.sh
+./start.sh          # 启动服务（后台运行，关闭终端不影响）
+./start.sh stop     # 停止服务
+./start.sh status   # 查看状态
+./start.sh restart  # 重启
 ```
 
 脚本会自动：
 - 检查依赖并安装 Python 包
+- 检测端口占用，已运行的服务自动跳过
 - 启动 trae-openai-proxy (http://127.0.0.1:8000)
 - 启动 OpenClaw Gateway (http://localhost:18789)
-- 按 Ctrl+C 停止所有服务
+- 使用 `nohup` + `caffeinate` 后台运行，关闭终端和盒盖均不影响
 
-### 方式二：手动启动
+>可在任意目录运行：`~/Documents/myRepository/trae-openai-proxy/start.sh`，不会改变当前工作目录。
+
+### 手动启动
 
 ```bash
 # 1. 安装依赖
 pip3 install -r requirements.txt
 
 # 2. 启动代理
-python3 main.py &
+nohup python3 main.py >> logs/proxy.log 2>&1 &
 
 # 3. 启动 OpenClaw
-openclaw gateway run &
+nohup openclaw gateway run >> logs/openclaw.log 2>&1 &
 ```
 
 ### 配置 OpenClaw
@@ -113,6 +118,7 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 | `DEFAULT_MODEL` | `"glm-5.1"` | 默认模型名称 |
 | `HOST` | `"127.0.0.1"` | 监听地址 |
 | `PORT` | `8000` | 监听端口 |
+| `WORKSPACE_DIR` | `~/.openclaw/workspace` | traecli 工作目录 |
 
 ## API 端点
 
@@ -192,20 +198,23 @@ openclaw gateway run
 
 ```
 trae-openai-proxy/
-├── main.py           # 代理服务（195 行）
-├── test_main.py      # 单元测试（67 行）
-├── start.sh          # 启动脚本（47 行）
-├── stop.sh           # 停止脚本
-└── requirements.txt  # Python 依赖
+├── main.py           # 代理服务
+├── test_main.py      # 单元测试
+├── start.sh          # 启动/停止/状态脚本
+├── requirements.txt  # Python 依赖
+└── logs/             # 日志目录（自动创建）
+    ├── proxy.log
+    └── openclaw.log
 ```
 
 ## 依赖
 
+运行时：
 - **fastapi** — Web 框架
 - **uvicorn** — ASGI 服务器
 - **pydantic** — 数据验证
-- **pytest** — 测试框架
-- **httpx** — HTTP 客户端（测试用）
+
+测试（`pytest` + `httpx`，启动脚本会自动安装）：
 
 ## 设计原则
 
@@ -223,8 +232,10 @@ trae-openai-proxy/
 - 删除字符串匹配的元数据处理逻辑
 - 错误处理改为抛异常（504/500）而非返回字符串
 - 删除假的 token 计算（`len(text.split())`）
-- 简化启动脚本：200 行 → 47 行
 - 添加 7 个单元测试验证核心流程
+- 启动脚本重构：支持 `start/stop/status/restart`，后台运行不占终端
+- 使用 `nohup` + `caffeinate` 防止关闭终端和盒盖导致服务中断
+- traecli 工作目录设为 `~/.openclaw/workspace`，与 openclaw 默认行为一致
 
 ## License
 

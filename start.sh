@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
-# 获取项目目录
+# 获取项目目录（不 cd，保持调用者的工作目录）
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$PROJECT_DIR"
 
 PID_DIR="$PROJECT_DIR/logs"
 LOG_DIR="$PROJECT_DIR/logs"
@@ -65,7 +64,8 @@ start_services() {
         echo "安装 Python 依赖..."
         python3 -m venv "$PROJECT_DIR/venv"
         source "$PROJECT_DIR/venv/bin/activate"
-        pip3 install -q -r requirements.txt
+        pip3 install -q -r "$PROJECT_DIR/requirements.txt"
+        pip3 install -q pytest httpx  # 测试依赖
     fi
 
     # 清空旧日志
@@ -77,7 +77,12 @@ start_services() {
         echo "trae-openai-proxy: 端口 8000 已被占用，跳过（如需重启请先运行 $0 stop）"
     else
         echo "启动 trae-openai-proxy (http://127.0.0.1:8000)..."
-        nohup python3 main.py >> "$LOG_DIR/proxy.log" 2>&1 &
+        # 阻止系统睡眠（盒盖后仍保持运行）
+        if command -v caffeinate >/dev/null 2>&1; then
+            nohup caffeinate -i python3 "$PROJECT_DIR/main.py" >> "$LOG_DIR/proxy.log" 2>&1 &
+        else
+            nohup python3 "$PROJECT_DIR/main.py" >> "$LOG_DIR/proxy.log" 2>&1 &
+        fi
         echo $! > "$PID_DIR/proxy.pid"
 
         # 等待代理就绪
@@ -101,7 +106,11 @@ start_services() {
         echo "OpenClaw: 端口 18789 已被占用，跳过（如需重启请先运行 $0 stop）"
     else
         echo "启动 OpenClaw (http://localhost:18789)..."
-        nohup openclaw gateway run >> "$LOG_DIR/openclaw.log" 2>&1 &
+        if command -v caffeinate >/dev/null 2>&1; then
+            nohup caffeinate -i openclaw gateway run >> "$LOG_DIR/openclaw.log" 2>&1 &
+        else
+            nohup openclaw gateway run >> "$LOG_DIR/openclaw.log" 2>&1 &
+        fi
         echo $! > "$PID_DIR/openclaw.pid"
 
         # 等待 OpenClaw 就绪

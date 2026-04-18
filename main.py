@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import asyncio
+import os
 import subprocess
 import json
 import logging
@@ -19,6 +20,7 @@ TRAECLI_TIMEOUT = 300             # TraeCLI调用超时（秒）
 DEFAULT_MODEL = "glm-5.1"         # 默认模型名称
 HOST = "127.0.0.1"
 PORT = 8000
+WORKSPACE_DIR = os.path.expanduser("~/.openclaw/workspace")  # traecli 工作目录
 
 # ─── 请求模型 ───────────────────────────────────────────
 class Message(BaseModel):
@@ -40,7 +42,8 @@ async def call_traecli(prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=TRAECLI_TIMEOUT,
-            check=True  # 非零退出码会抛出 CalledProcessError
+            check=True,
+            cwd=WORKSPACE_DIR
         )
         return result.stdout.strip()
 
